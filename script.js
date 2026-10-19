@@ -16,6 +16,7 @@ const passwordInput = document.getElementById("password");
 const signupBtn = document.getElementById("signup-btn");
 const logoutBtn = document.getElementById("logout-btn");
 const who = document.getElementById("who");
+const onlineUsers = document.getElementById("online-users");
 const messageList = document.getElementById("messages");
 const messageForm = document.getElementById("message-form");
 const messageInput = document.getElementById("message-input");
@@ -91,7 +92,7 @@ async function startChat(user) {
   await loadNames();
   who.textContent = names[user.id] || "Signed in";
   await loadMessages();
-  listenForNewMessages();
+  joinChatChannel();
   messageInput.focus();
 }
 
@@ -301,11 +302,33 @@ async function nameFor(userId) {
   return names[userId];
 }
 
-function listenForNewMessages() {
+function renderOnlineUsers() {
+  if (!channel) return;
+
+  const users = new Map();
+  Object.values(channel.presenceState()).forEach((presences) => {
+    presences.forEach((presence) => {
+      if (presence.user_id && presence.display_name) {
+        users.set(presence.user_id, presence.display_name);
+      }
+    });
+  });
+
+  const namesOnline = Array.from(users.values()).sort((a, b) => a.localeCompare(b));
+  onlineUsers.textContent = namesOnline.length
+    ? "Online (" + namesOnline.length + "): " + namesOnline.join(", ")
+    : "No one else is online";
+}
+
+function joinChatChannel() {
   if (channel) sb.removeChannel(channel);
 
-  channel = sb
-    .channel("class-chat")
+  const activeUser = currentUser;
+  const chatChannel = sb
+    .channel("class-chat", { config: { presence: { key: activeUser.id } } })
+    .on("presence", { event: "sync" }, renderOnlineUsers)
+    .on("presence", { event: "join" }, renderOnlineUsers)
+    .on("presence", { event: "leave" }, renderOnlineUsers)
     .on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "messages" },
@@ -318,8 +341,25 @@ function listenForNewMessages() {
       "postgres_changes",
       { event: "DELETE", schema: "public", table: "messages" },
       (payload) => removeMessage(payload.old.id)
-    )
-    .subscribe();
+    );
+  channel = chatChannel;
+
+  chatChannel.subscribe(async (status) => {
+    if (status === "SUBSCRIBED") {
+      if (channel !== chatChannel || currentUser !== activeUser) return;
+      const result = await chatChannel.track({
+        user_id: activeUser.id,
+        display_name: names[activeUser.id] || "Signed in",
+      });
+      if (result !== "ok") {
+        console.error("Could not share online presence:", result);
+        onlineUsers.textContent = "Could not connect to online status";
+      }
+    } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+      console.error("Realtime channel connection failed:", status);
+      onlineUsers.textContent = "Online status unavailable";
+    }
+  });
 }
 
 function removeMessage(id) {
