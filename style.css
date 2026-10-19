@@ -3,9 +3,9 @@
   --page: #e4eaef;
   --panel: #ffffff;
   --ink: #17252f;
-  --muted: #5d6f7c;
-  --line: #d3dce3;
-  --mine: #0f5c6e;
+  --muted: #060708;
+  --line: #0b0e11;
+  --mine: #90eeff;
   --mine-text: #ffffff;
   --theirs: #eef2f5;
   --focus: #e08a00;
@@ -126,7 +126,7 @@ body {
   color: var(--muted);
 }
 
-.message.mine .author { color: #b7dde5; }
+.message.mine .author { color: #070808; }
 
 .message p {
   margin: 0;
@@ -141,7 +141,30 @@ body {
   color: var(--muted);
 }
 
-.message.mine time { color: #b7dde5; }
+.message.mine time { color: #020708; }
+
+.message-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.delete-message {
+  padding: 2px 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.delete-message:hover { background: rgba(0, 0, 0, 0.08); }
+.delete-message:disabled { cursor: wait; opacity: 0.7; }
+
+.delete-status {
+  font-size: 0.75rem;
+  color: #8b1e18;
+}
 
 /* ---------- Composer ---------- */
 .composer {

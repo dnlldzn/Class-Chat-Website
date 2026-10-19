@@ -24,6 +24,7 @@ const messageInput = document.getElementById("message-input");
 let currentUser = null; // the logged-in user, or null
 const names = {}; // user id -> display name
 let channel = null; // the realtime connection (used in Part 4)
+const BOT_MESSAGE_PREFIX = "[[class-chat-bot:v1]] ";
 
 // ---------- 4. Sign up, log in, log out ----------
 async function signUp() {
@@ -110,17 +111,18 @@ function showMessage(msg) {
   if (messageList.querySelector(`[data-id="${ msg.id }"]`)) return;
 
   const isMine = msg.user_id === currentUser.id;
+  const isBot = msg.content.startsWith(BOT_MESSAGE_PREFIX);
   const item = document.createElement("li");
-  item.className = isMine ? "message mine" : "message";
+  item.className = isBot ? "message bot" : isMine ? "message mine" : "message";
   item.dataset.id = msg.id;
 
   const author = document.createElement("span");
   author.className = "author";
-  author.textContent = names[msg.user_id] || "Unknown";
+  author.textContent = isBot ? "ClassChatBot" : names[msg.user_id] || "Unknown";
 
   const text = document.createElement("p");
   // textContent (not innerHTML) keeps the page safe from injected HTML
-  text.textContent = msg.content;
+  text.textContent = isBot ? msg.content.slice(BOT_MESSAGE_PREFIX.length) : msg.content;
 
   const time = document.createElement("time");
   time.textContent = new Date(msg.created_at).toLocaleTimeString([], {
@@ -129,8 +131,51 @@ function showMessage(msg) {
   });
 
   item.append(author, text, time);
+  if (isMine) {
+    const actions = document.createElement("div");
+    actions.className = "message-actions";
+
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "delete-message";
+    deleteButton.type = "button";
+    deleteButton.textContent = "Delete";
+    deleteButton.setAttribute("aria-label", "Delete your message");
+
+    const deleteStatus = document.createElement("span");
+    deleteStatus.className = "delete-status";
+    deleteStatus.setAttribute("role", "status");
+
+    deleteButton.addEventListener("click", () => {
+      deleteOwnMessage(msg.id, item, deleteButton, deleteStatus);
+    });
+    actions.append(deleteButton, deleteStatus);
+    item.appendChild(actions);
+  }
+
   messageList.appendChild(item);
   messageList.scrollTop = messageList.scrollHeight;
+}
+
+async function deleteOwnMessage(id, item, button, status) {
+  button.disabled = true;
+  status.textContent = "Deleting...";
+
+  const { data, error } = await sb
+    .from("messages")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", currentUser.id)
+    .select("id")
+    .maybeSingle();
+
+  if (error || !data) {
+    if (error) console.error(error);
+    button.disabled = false;
+    status.textContent = "Could not delete.";
+    return;
+  }
+
+  item.remove();
 }
 
 // ---------- 8. Send a message to the database (INSERT) ----------
@@ -141,8 +186,14 @@ messageForm.addEventListener("submit", async (event) => {
   if (content === "") return;
   messageInput.value = "";
 
-  // Commands such as /weather stay on your screen. They are not saved.
   if (content.startsWith("/")) {
+    const { data, error } = await insertMessage(content);
+    if (error) {
+      console.error(error);
+      showFailedMessage(content);
+      return;
+    }
+    showMessage(data);
     handleCommand(content);
     return;
   }
@@ -325,11 +376,34 @@ async function getWeather(city) {
   );
 }
 
+async function getJoke() {
+  const response = await fetch("https://v2.jokeapi.dev/joke/Any?safe-mode");
+  if (!response.ok) throw new Error("Joke service request failed");
+
+  const data = await response.json();
+  if (data.error) throw new Error(data.message || "Joke service returned an error");
+
+  if (data.type === "single") return data.joke;
+  if (data.type === "twopart") return data.setup + " — " + data.delivery;
+  throw new Error("Joke service returned an unsupported response");
+}
+
 async function handleCommand(text) {
   const words = text.split(" ");
 
-  if (words[0].toLowerCase() !== "/weather") {
-    showBotMessage("Unknown command. Try: /weather Manila or /weather home");
+  const command = words[0].toLowerCase();
+  if (command === "/joke") {
+    try {
+      showBotMessage(await getJoke());
+    } catch (error) {
+      console.error(error);
+      showBotMessage("The joke service is not answering right now.");
+    }
+    return;
+  }
+
+  if (command !== "/weather") {
+    showBotMessage("Unknown command. Try: /weather Manila, /weather home, or /joke");
     return;
   }
 
@@ -370,13 +444,23 @@ async function handleCommand(text) {
   }
 }
 
-function showBotMessage(text) {
+async function showBotMessage(text) {
+  const { data, error } = await insertMessage(BOT_MESSAGE_PREFIX + text);
+  if (error) {
+    console.error(error);
+    showBotSaveError(text);
+    return;
+  }
+  showMessage(data);
+}
+
+function showBotSaveError(text) {
   const item = document.createElement("li");
-  item.className = "message bot";
+  item.className = "message bot failed";
 
   const author = document.createElement("span");
   author.className = "author";
-  author.textContent = "WeatherBot (only you can see this)";
+  author.textContent = "ClassChatBot (not shared)";
 
   const body = document.createElement("p");
   body.textContent = text;
